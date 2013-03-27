@@ -1,41 +1,48 @@
 #!/bin/bash
 
 # CONFIG
-AURGITCLONE=/home/td123/tmp/aurgitclone
-AURTEST=/home/td123/tmp/aursrcpkgs
 
+#working directory
+AURCLONE=/home/xx/aurs
+
+#source of the sync
+AURSRC=/home/xx/satupad/aur-mirror
+
+mkdir -p $AURCLONE 
 # SANITY CHECKS
-[ ! -d $AURGITCLONE ] && echo "run: git clone /srv/git/aur.git/ $AURGITCLONE"j&& exit 1
-[ ! -d $AURTEST ] &&  echo "run: install -d $AURTEST" && exit 1
+#[ ! -d $AURCLONE ] && echo "run: git clone /srv/git/aur.git/ $AURGITCLONE"j&& exit 1
+#[! -d $AURCLONE ] &&  mkdir -p $AURCLONE
 
-# Syncing *.src.tar.gz
-cd $AURTEST
-rm -f /tmp/rlog
-rsync -avz --include '/*.tar.gz' --exclude '/*' --exclude '/.git/' --temp-dir '/tmp' --inplace --update --delete \
-      'rsync://aur.archlinux.org/unsupported/*/*/*.tar.gz' . |& tee /tmp/rlog
+cd $AURCLONE
 
-# Process all the stuff
-cd $AURGITCLONE
-while read line; do
-  match=$(echo $line | sed -n 's/^deleting \(.*\).tar.gz/\1/p')
 
-  if [[ x$match != x ]]; then
-    rm -rf ${match}
-    #echo deleted
-  else
-    match=$(echo $line | sed -n 's/^\(.*\).tar.gz/\1/p')
-    if [[ x$match != x ]]; then
-      #echo updated
-      rm -rf ${match}
-      mkdir ${match}
-      bsdtar -s ',.*/,,' -C ${match} -xf $AURTEST/${match}.tar.gz
-    fi
-  fi
-done < /tmp/rlog
-rm -f /tmp/rlog
+#rsync -avz --include '/*.tar.gz' --exclude '/*' --exclude '/.git/' --temp-dir '/tmp' --inplace --update --delete 'rsync://aur.archlinux.org/unsupported/*/*/*.tar.gz' . |& tee /tmp/rlog
 
-# GIT STUFF
-git add -A 
-git commit -am "updated on $(date)"
-git gc --auto
-git push origin master
+#rsync from the git repo, as I have no permission to use rsync server
+cd $AURSRC
+git pull
+rsync -avz -P --exclude '/.git/' --temp-dir '/tmp' --inplace --update --delete $AURSRC $AURCLONE |& tee /tmp/rlog
+
+#iterate over the directories
+for dir in `ls -1`; do
+   DIR=$AURCLONE/$dir
+   if [ ! -d $DIR/.git ] ; then
+      git init 
+   fi
+   cd $DIR
+   CHANGED=$(git status -s | wc -l)
+   if [ $CHANGED -gt 0 ] ; then
+
+      #calculating a good commit message
+      export MESSAGE="auto update"
+      export NEWVER=$(git diff --no-color  PKGBUILD | grep "+pkgver" | awk 'BEGIN{FS="="}{gsub(/[ \t]+$/, "", $2);print $2}')
+      if [ ! -z "$NEWVER" ] ; then
+         export MESSAGE="update to version $NEWVER"
+      fi
+      git add --all 
+      git commit -m "$MESSAGE"
+   fi
+done
+
+
+
